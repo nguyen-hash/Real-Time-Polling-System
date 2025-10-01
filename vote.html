@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Real-Time Poll with JWT</title>
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    h1 { font-size: 24px; }
+    button { margin: 5px; padding: 10px 20px; }
+    #options button { display: block; margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+
+<h2>Select User</h2>
+<select id="userSelect">
+  <option value="user1">User 1</option>
+  <option value="user2">User 2</option>
+  <option value="user3">User 3</option>
+  <option value="user4">User 4</option>
+  <option value="user5">User 5</option>
+</select>
+<button onclick="login()">Login</button>
+
+<h1 id="poll-question">Loading Poll...</h1>
+<div id="options"></div>
+
+<script>
+  // Map users to their JWTs (replace with your real tokens)
+  const userTokens = {
+    "user1": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbWZ6NmRucjAwMDAwdzd5OGtmZjhreTdoIiwidXNlcm5hbWUiOiJ0ZXN0dXNlciIsImlhdCI6MTc1ODg1Mjg4OSwiZXhwIjoxNzU4ODU2NDg5fQ.ltV76qURofB3So4CfpuVmGebc4bEJfViQ7ho0IWZkYE",
+    "user2": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbWZ6N3VibDEwMDAwdzdtczBsMDBsMW9pIiwidXNlcm5hbWUiOiJ0ZXN0dXNlcjEiLCJpYXQiOjE3NTg4NTI5MTksImV4cCI6MTc1ODg1NjUxOX0.09Yb7_rCdivij4pfFkf4IBTcwxmT-oBoVcNRR4m9gu0",
+    "user3": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbWZ6N3V2bjQwMDAxdzdtc2hibWxsZDlyIiwidXNlcm5hbWUiOiJ0ZXN0dXNlcjIiLCJpYXQiOjE3NTg4NTI5MzksImV4cCI6MTc1ODg1NjUzOX0.hSh1uODN9WCVTlfnjXSoAZtM8f7wD8TYOgwPgeunGTE",
+    "user4": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbWZ6N3V2bjQwMDAydzdtczE2ZWNnYXBuIiwidXNlcm5hbWUiOiJ0ZXN0dXNlcjMiLCJpYXQiOjE3NTg4NTI5NjMsImV4cCI6MTc1ODg1NjU2M30.5QyPxBjA2xDEIswInY43vjNid_3fMEcyGfAI1XaCc-I",
+    "user5": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJjbWZ6N3V2bjQwMDAzdzdtc3EydmludjNtIiwidXNlcm5hbWUiOiJ0ZXN0dXNlcjQiLCJpYXQiOjE3NTg4NTI5NzksImV4cCI6MTc1ODg1NjU3OX0.1KgqDCM8XzDLFtXg8--TqXWMKvGOLrPdgM4YzWQaGXA",
+  };
+
+  let socket = null;
+  let POLL_ID = "cmg0630gj0000w7rg7pb9dqbn"; // Replace with your poll ID
+  let JWT_TOKEN = null;
+
+  // Login as selected user
+  function login() {
+    const selectedUser = document.getElementById("userSelect").value;
+    JWT_TOKEN = userTokens[selectedUser];
+    if (!JWT_TOKEN) return alert("JWT not found for this user.");
+
+    // Connect to Socket.IO with JWT
+    socket = io("http://localhost:3000", {
+      auth: { token: JWT_TOKEN }
+    });
+
+    socket.on("connect", () => {
+      console.log("Connected:", socket.id);
+      socket.emit("joinRoom", POLL_ID);
+      fetchPoll();
+    });
+
+    // Listen for real-time updates
+    socket.on("poll:update", (poll) => {
+      console.log("Poll update:", poll);
+      displayPoll(poll);
+    });
+
+    socket.on("disconnect", () => {
+      console.log("Disconnected from server");
+    });
+  }
+
+  // Fetch poll data
+  async function fetchPoll() {
+    const res = await fetch(`http://localhost:3000/polls/${POLL_ID}`, {
+      headers: { "Authorization": `Bearer ${JWT_TOKEN}` }
+    });
+    if (!res.ok) return alert("Failed to fetch poll");
+    const poll = await res.json();
+    displayPoll(poll);
+  }
+
+  // Display poll question and options
+  function displayPoll(poll) {
+    document.getElementById("poll-question").textContent = poll.question;
+    const optionsDiv = document.getElementById("options");
+    optionsDiv.innerHTML = "";
+
+    poll.options.forEach(opt => {
+      const btn = document.createElement("button");
+      btn.textContent = `${opt.text} (${opt.votes})`;
+      btn.onclick = () => vote(POLL_ID, opt.id);
+      optionsDiv.appendChild(btn);
+    });
+  }
+
+  // Vote for an option
+  async function vote(pollId, optionId) {
+    const res = await fetch(`http://localhost:3000/polls/${pollId}/vote`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${JWT_TOKEN}`
+      },
+      body: JSON.stringify({ optionId })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      return alert(err.message || "Failed to vote");
+    }
+
+    const updatedOption = await res.json();
+    console.log("Vote registered:", updatedOption);
+  }
+</script>
+
+</body>
+</html>
